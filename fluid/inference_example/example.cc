@@ -91,6 +91,10 @@ int main(int argc, char** argv) {
 
   // call once
   executor->CreateVariables(*inference_program, scope, 0);
+  for (int i = 0; i < 5; ++i) {
+    executor->Run(*inference_program, scope, feed_targets, fetch_targets, false);
+  }
+
   clock_t start_time,end_time;
   std::cout << FLAGS_repeat << std::endl;
   start_time = clock();
