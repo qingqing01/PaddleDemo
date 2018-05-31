@@ -17,6 +17,7 @@ include_directories(${PADDLE_ROOT}/third_party/install/glog/include)
 include_directories(${PADDLE_ROOT}/third_party/install/protobuf/include)
 include_directories(${PADDLE_ROOT}/third_party/install/snappystream/include)
 include_directories(${PADDLE_ROOT}/third_party/install/snappy/include)
+include_directories(${PADDLE_ROOT}/third_party/install/zlib/include)
 include_directories(${PADDLE_ROOT}/third_party/eigen3)
 include_directories(${PADDLE_ROOT}/)
 set(MATH_LIB ${PADDLE_ROOT}/third_party/install/openblas/lib/libopenblas.a)
@@ -25,6 +26,7 @@ if(LIB_TYPE STREQUAL "shared")
     ${PADDLE_ROOT}/paddle/fluid/inference/libpaddle_fluid.so
     ${PADDLE_ROOT}/third_party/install/gflags/lib/libgflags.a
     ${MATH_LIB}
+    ${CUDA_ROOT}/lib64/libcudart.so
     -lrt -ldl -lpthread)
 else()
   target_link_libraries(${PROJECT_NAME} 
