@@ -20,12 +20,14 @@ limitations under the License. */
 #include "paddle/fluid/framework/init.h"
 #include "paddle/fluid/framework/lod_tensor.h"
 #include "paddle/fluid/inference/io.h"
+#include "paddle/fluid/platform/profiler.h"
 
 DEFINE_string(dirname, "", "Directory of the inference model.");
 DEFINE_int32(num_threads, 1, "Threads number.");
 DEFINE_int32(num_samples, 4, "Total threads number.");
 DEFINE_int32(print_outputs, 0, "Whether to print the outputs.");
 DEFINE_int32(batch_size, 1, "Batch size.");
+DEFINE_int32(use_gpu, 1, "whether use gpu.");
 DECLARE_double(fraction_of_gpu_memory_to_use);
 
 void RunInference(
@@ -62,9 +64,16 @@ void RunInference(
   }
 
   // 6. Run the inference program
+  auto &lscope = scope->NewScope();
+  executor->CreateVariables(*copy_program, &lscope, 0);
+  auto ctx = executor->Prepare(*copy_program, 0);
+
+  std::cout << "Thread " << thread_id << " run " << repeat_num << " times" << std::endl;
   for (int i = 0; i < repeat_num; ++i) {
-    executor->Run(*copy_program, scope, &feed_targets, &fetch_targets, true,
-                  true, feed_holder_name, fetch_holder_name);
+    // executor->Run(*copy_program, scope, &feed_targets, &fetch_targets, true,
+    //               true, feed_holder_name, fetch_holder_name);
+    executor->RunPreparedContext(ctx.get(), &lscope, &feed_targets, &fetch_targets, false,
+                  false, feed_holder_name, fetch_holder_name);
   }
 }
 
@@ -86,10 +95,16 @@ int main(int argc, char** argv) {
   }
 
   // 1. Define place, executor, scope
-  auto place = paddle::platform::CUDAPlace(0);
+  // auto place = paddle::platform::CUDAPlace(0);
+  paddle::platform::Place place;
+  if(FLAGS_use_gpu) {
+    place = paddle::platform::CUDAPlace(0);
+  } else {
+    place = paddle::platform::CPUPlace();
+  }
   std::vector<std::string> argvs;
   argvs.push_back("");
-  argvs.push_back("--fraction_of_gpu_memory_to_use=0.5");
+  argvs.push_back("--fraction_of_gpu_memory_to_use=0.8");
   paddle::framework::InitGflags(argvs);
   paddle::framework::InitDevices(false);
   auto* executor = new paddle::framework::Executor(place);
@@ -129,28 +144,41 @@ int main(int argc, char** argv) {
     cpu_fetchs[i].push_back(output);
   }
 
+  // RunInference(inference_program, executor, scope,
+  //     cpu_feeds[0], cpu_fetchs[0], 5, 0);
+
   // 3. Optional: perform optimization on the inference_program
+  // paddle::platform::EnableProfiler(paddle::platform::ProfilerState::kAll);
   int repeate_num = FLAGS_num_samples / num_threads / 2;
   uint64_t start_ns = PosixInNsec();
   if (num_threads == 1) {
+    paddle::framework::InitDevices(false);
     RunInference(inference_program, executor, scope,
         cpu_feeds[0], cpu_fetchs[0], repeate_num, 0);
   } else {
     std::vector<std::thread*> threads;
     for (int i = 0; i < num_threads; ++i) {
       threads.push_back(new std::thread([&, i](){
-        RunInference(inference_program, executor, scope,
+        uint64_t start = PosixInNsec();
+        paddle::framework::InitDevices(false);
+        auto* exe = new paddle::framework::Executor(place);
+        RunInference(inference_program, exe, scope,
             cpu_feeds[i], cpu_fetchs[i], repeate_num, i);
+        uint64_t end = PosixInNsec();
+        std::cout << "Thread " << i << " Time :" <<(double)(end - start)/1000.0 << std::endl;
       }));
     }
     for (int i = 0; i < num_threads; ++i) {
       threads[i]->join();
-      // delete threads[i];
+      delete threads[i];
     }
   }
 
   uint64_t end_ns = PosixInNsec();
-  std::cout << "Totle Time : " <<(double)(end_ns - start_ns)/1000.0 << std::endl;
+  std::cout << "Total Time : " <<(double)(end_ns - start_ns)/1000.0 << std::endl;
+  // paddle::platform::DisableProfiler(
+  //     paddle::platform::EventSortingKey::kDefault,
+  //     paddle::string::Sprintf("/tmp/profile_infer"));
 
   // Get outputs
   if (FLAGS_print_outputs) {
